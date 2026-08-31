@@ -1,8 +1,14 @@
 """
 LangGraph orchestration for the AI Avatar Video Pipeline.
 
-Pipeline (matches the build spec's stage list):
-  voice_conversion -> normalize_video -> lipsync -> qa -> deliver
+Pipeline:
+  voice_conversion -> trim_lead_silence -> normalize_video -> lipsync -> qa -> deliver
+
+trim_lead_silence was added in the Day 6 addendum (see project handoff
+doc) after real testing showed Sync Labs rendering mouth motion during
+the quiet lead-in of converted audio, before any real speech. It runs
+on every job, not conditionally - same reasoning as normalize_video's
+own docstring on why its fix isn't optional either.
 
 Each stage's own client (ElevenLabsVoiceChanger, SyncLabsLipsyncClient)
 already retries transient/5xx errors internally via tenacity. This graph
@@ -27,6 +33,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from agents.tools.audio_trim import AudioTrimError, trim_leading_silence
 from agents.tools.elevenlabs_voice_changer import (
     ElevenLabsVoiceChanger,
     VoiceChangerError,
@@ -50,12 +57,14 @@ class PipelineState(TypedDict):
     lipsync_model: str
 
     converted_audio_path: str | None
+    trimmed_audio_path: str | None
     normalized_video_path: str | None
     lipsync_output_path: str | None
     qa: dict | None
 
-    # queued -> converting_voice_done -> normalizing_video_done ->
-    # lipsyncing_done -> qa_passed|needs_review -> completed|needs_review
+    # queued -> converting_voice_done -> trimming_audio_done ->
+    # normalizing_video_done -> lipsyncing_done -> qa_passed|needs_review
+    # -> completed|needs_review
     # or, at any stage: failed
     status: str
     error: str | None
@@ -73,6 +82,19 @@ def voice_conversion_node(state: PipelineState) -> PipelineState:
         logger.error("[%s] voice_conversion failed: %s", state["job_id"], exc)
         return {**state, "status": "failed", "error": str(exc), "error_stage": "voice_conversion"}
     return {**state, "converted_audio_path": str(converted_path), "status": "converting_voice_done"}
+
+
+def trim_lead_silence_node(state: PipelineState) -> PipelineState:
+    if state["status"] == "failed":
+        return state
+    out_dir = Path(state["output_dir"])
+    trimmed_path = out_dir / f"{state['job_id']}_trimmed_audio.mp3"
+    try:
+        trim_leading_silence(state["converted_audio_path"], trimmed_path)
+    except AudioTrimError as exc:
+        logger.error("[%s] trim_lead_silence failed: %s", state["job_id"], exc)
+        return {**state, "status": "failed", "error": str(exc), "error_stage": "trim_lead_silence"}
+    return {**state, "trimmed_audio_path": str(trimmed_path), "status": "trimming_audio_done"}
 
 
 def normalize_video_node(state: PipelineState) -> PipelineState:
@@ -97,7 +119,7 @@ def lipsync_node(state: PipelineState) -> PipelineState:
         client = SyncLabsLipsyncClient()
         result = client.generate_from_files(
             state["normalized_video_path"],
-            state["converted_audio_path"],
+            state["trimmed_audio_path"],
             output_path,
             options=LipsyncOptions(model=state.get("lipsync_model", "lipsync-2")),
         )
@@ -142,13 +164,15 @@ def deliver_node(state: PipelineState) -> PipelineState:
 def build_graph():
     builder = StateGraph(PipelineState)
     builder.add_node("voice_conversion", voice_conversion_node)
+    builder.add_node("trim_lead_silence", trim_lead_silence_node)
     builder.add_node("normalize_video", normalize_video_node)
     builder.add_node("lipsync", lipsync_node)
     builder.add_node("qa", qa_node)
     builder.add_node("deliver", deliver_node)
 
     builder.set_entry_point("voice_conversion")
-    builder.add_edge("voice_conversion", "normalize_video")
+    builder.add_edge("voice_conversion", "trim_lead_silence")
+    builder.add_edge("trim_lead_silence", "normalize_video")
     builder.add_edge("normalize_video", "lipsync")
     builder.add_edge("lipsync", "qa")
     builder.add_edge("qa", "deliver")
@@ -180,6 +204,7 @@ def run_pipeline(
         "voice_params": voice_params,
         "lipsync_model": lipsync_model,
         "converted_audio_path": None,
+        "trimmed_audio_path": None,
         "normalized_video_path": None,
         "lipsync_output_path": None,
         "qa": None,

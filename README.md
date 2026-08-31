@@ -16,7 +16,7 @@ a single still image.
 
 ```
 raw audio read  ──┐
-                   ├─► voice conversion ──► normalize video ──► lipsync ──► QA check ──► finished clip
+                   ├─► voice conversion ──► trim lead-in ──► normalize video ──► lipsync ──► QA check ──► finished clip
 reference video ──┘
 ```
 
@@ -24,23 +24,31 @@ reference video ──┘
    through a speech-to-speech voice-clone conversion (same words, same
    delivery, corrected voice characteristics). This is speech-to-speech,
    not text-to-speech — it starts from the creator's real performance.
-2. **Video normalization** — the reference video is re-encoded so any
+2. **Trim lead-in** — any quiet, non-speech audio at the very start of
+   the converted track (room tone, breath, near-silence) is detected and
+   cut before the audio reaches the lipsync stage. This closes a real
+   failure mode found during testing: the lipsync provider rendered
+   continuous mouth motion through a quiet lead-in as if it were speech,
+   producing a visible mouth/audio mismatch in the first ~1-2 seconds of
+   a clip. See Known Constraints below for what this does and doesn't
+   guarantee.
+3. **Video normalization** — the reference video is re-encoded so any
    rotation metadata is baked into the actual pixels before it reaches the
    lipsync stage. This closes a real, non-obvious failure mode found
    during testing: a video's rotation tag was sometimes misread by the
    lipsync provider, producing a correctly-processed but sideways output.
    Normalizing removes the ambiguity up front rather than hoping it's
    read correctly.
-3. **Lipsync** — the corrected audio is fused onto the normalized
+4. **Lipsync** — the corrected audio is fused onto the normalized
    reference video via a commercial lipsync API.
-4. **QA check** — the finished output's duration is automatically
+5. **QA check** — the finished output's duration is automatically
    compared against the reference video's duration, and a sample of
    frames is checked for a detectable face (catching a gross failure —
    the provider returning a blank, corrupted, or wildly wrong clip). A
    failure on either check flags the job for manual review instead of
    silently shipping a bad result. Neither check judges lip-sync accuracy
    or subtle visual quality — see Known Constraints below.
-5. **Delivery** — the finished clip and a full job record (what
+6. **Delivery** — the finished clip and a full job record (what
    succeeded, what failed, at which stage, and why) are written to disk
    and available via the API.
 
@@ -147,6 +155,30 @@ submission step needed for a recurring/scheduled content pipeline.
   blending issues. A human should review the output before it ships to a
   client or goes live, especially for the first several runs against new
   footage.
+- **A quiet lead-in was found causing visible mouth motion before any real
+  speech.** Found during Day 6 QA on real test clips (three different
+  clips, all confirmed affected): the lipsync provider does not appear to
+  distinguish true digital silence from quiet-but-nonzero audio (room
+  tone, breath) at the start of a track, and renders continuous mouth
+  motion through it as if it were speech. Fixed with an automated
+  pre-processing step (`agents/tools/audio_trim.py`) that detects and
+  trims a leading quiet block from the converted audio before it reaches
+  the lipsync API, run on every job. Verified two ways: on the input side,
+  the trimmed audio opens directly on the real speech onset with no
+  clipping; and against a real re-generation through the actual lipsync
+  API with the trimmed audio, where the output's own mouth motion now
+  tracks the ~100ms-scale timing of the real audio instead of the
+  original ~1.9s mismatch. A full-attention watch with sound on that
+  re-generated clip is still the final human confirmation step, same as
+  every other clip this pipeline produces. One documented limitation:
+  the detector only trims a
+  single contiguous quiet block — a brief loud blip (a click, an early
+  breath spike) inside what should be the lead-in would stop detection
+  early and leave some residual quiet audio untrimmed. Not observed in
+  this project's actual audio so far, but worth knowing before assuming
+  this is bulletproof against every possible source read. As with the
+  jaw/mouth-boundary artifact above, review the first several seconds of
+  new footage before it ships.
 - **This pipeline does not have audio-listening capability built in.**
   The automated checks are visual/structural (duration, orientation,
   frame-level sanity). Final confirmation that the lip movement actually

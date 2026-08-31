@@ -85,6 +85,7 @@ def test_pipeline_happy_path():
         assert final_state["error"] is None, final_state
         assert final_state["status"] in ("completed", "needs_review"), final_state
         assert Path(final_state["converted_audio_path"]).exists()
+        assert Path(final_state["trimmed_audio_path"]).exists()
         assert Path(final_state["normalized_video_path"]).exists()
         assert Path(final_state["lipsync_output_path"]).exists()
         assert final_state["qa"] is not None
@@ -111,7 +112,8 @@ def test_pipeline_voice_conversion_failure_short_circuits():
 
     assert final_state["status"] == "failed"
     assert final_state["error_stage"] == "voice_conversion"
-    # normalize_video/lipsync/qa must NOT have run after the failure
+    # trim_lead_silence/normalize_video/lipsync/qa must NOT have run after the failure
+    assert final_state["trimmed_audio_path"] is None
     assert final_state["normalized_video_path"] is None
     assert final_state["lipsync_output_path"] is None
     print("PASS: voice_conversion failure short-circuits the rest of the pipeline")
