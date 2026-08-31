@@ -1,0 +1,24 @@
+elevenlabs>=1.9.0
+syncsdk>=0.1.0
+python-dotenv>=1.0.1
+requests>=2.32.0
+pydantic>=2.7.0
+pydantic-settings>=2.4.0
+tenacity>=8.5.0
+
+# Day 4 - orchestration
+langgraph>=1.2.11
+fastapi>=0.141.1
+uvicorn[standard]>=0.52.4
+apscheduler>=3.11.3
+python-multipart>=0.0.32
+
+# Day 6 - QA hardening (face-detection-confidence check)
+# Pinned to the 4.x line deliberately: opencv-python 5.x dropped
+# cv2.CascadeClassifier from its default build in favor of the DNN-based
+# FaceDetectorYN, which needs a separately-downloaded ONNX model file.
+# 4.x still ships the classic Haar cascades bundled in the wheel - no
+# extra download needed at runtime, which matters for a lightweight QA
+# check that should not depend on network access to run.
+opencv-python-headless==4.10.0.84
+numpy==2.2.6

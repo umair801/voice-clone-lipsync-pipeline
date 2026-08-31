@@ -1,0 +1,59 @@
+# Secrets - never commit
+.env
+.env.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Generated media - large binaries, don't belong in git history
+audio_samples/input/*.mp3
+audio_samples/input/*.wav
+audio_samples/output/*.mp3
+audio_samples/output/*.wav
+!audio_samples/input/.gitkeep
+!audio_samples/output/.gitkeep
+
+# Video output (added Day 2-3 once Sync Labs stage exists)
+video_samples/output/*.mp4
+!video_samples/output/.gitkeep
+
+# Reference footage (real recordings of a real person's face) and the raw
+# voice-clone test read - personal media, not code. Kept out of git history
+# for the same reason as generated output: don't put a real person's face/
+# voice recordings in a public repo without a deliberate decision to do so.
+video_samples/input/*.mp4
+!video_samples/input/.gitkeep
+test_read.mp3
+
+# Logs
+*.log
+
+# Ad-hoc debug/scratch output from manual testing sessions - not part of
+# the deliverable, regenerate on demand rather than committing
+submit_std*.txt
+qa_frames_*/
+
+# Internal build-status doc - repeats the internal project code name
+# throughout, never belongs in a public repo. The full, current version
+# lives in the Claude project docs, not here.
+Day1_Status_and_Day2-3_Handoff.md
+
+# Day 4 - generated at runtime, never commit
+job_outputs/
+incoming/
