@@ -15,7 +15,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
+from api.demo import router as demo_router
 from api.routes import router
 from api.scheduler import start_scheduler
 from core.logging import get_logger
@@ -52,3 +54,9 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(demo_router)
+
+# Public demo frontend (Phase 1) - served from the same origin as the
+# API, so no CORS configuration is needed for it specifically. html=True
+# serves frontend/index.html at "/".
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

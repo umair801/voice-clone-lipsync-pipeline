@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice-Clone Lipsync Pipeline — Demo</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151c; --border: #21262d; --ink: #e6edf3;
+    --muted: #8b949e; --accent: #3fb950; --accent2: #58a6ff; --danger: #ff7b72; --input-bg: #161b22;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    padding: 48px 20px;
+  }
+  .wrap { width: 100%; max-width: 640px; }
+  h1 { font-size: 24px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 14.5px; margin: 0 0 32px; line-height: 1.5; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 28px; margin-bottom: 20px;
+  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 22px; }
+  .tab {
+    flex: 1; text-align: center; padding: 9px; border-radius: 8px; font-size: 13.5px;
+    font-weight: 600; cursor: pointer; border: 1px solid var(--border); color: var(--muted);
+    background: var(--input-bg);
+  }
+  .tab.active { color: var(--ink); border-color: var(--accent2); background: #10233a; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--ink); }
+  .field { margin-bottom: 18px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  input[type="text"], input[type="file"] {
+    width: 100%; background: var(--input-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; color: var(--ink); font-size: 14px;
+  }
+  input[type="text"]:focus { outline: none; border-color: var(--accent); }
+  button {
+    width: 100%; background: var(--accent); color: #04150a; border: none;
+    border-radius: 8px; padding: 13px; font-size: 15px; font-weight: 650;
+    cursor: pointer; margin-top: 4px;
+  }
+  button.secondary { background: var(--accent2); color: #041226; }
+  button:disabled { background: #21262d; color: var(--muted); cursor: not-allowed; }
+  .paid-banner {
+    background: rgba(63,185,80,0.12); border: 1px solid rgba(63,185,80,0.4);
+    border-radius: 8px; padding: 10px 14px; font-size: 13.5px; color: #7ee2a8;
+    margin-bottom: 18px;
+  }
+  #status { display: none; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .status-row { display: flex; align-items: center; gap: 10px; font-size: 14px; margin-bottom: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+  .dot.running { background: #d29922; animation: pulse 1.2s infinite; }
+  .dot.completed { background: var(--accent); }
+  .dot.failed { background: var(--danger); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  #errorMsg { color: var(--danger); font-size: 13.5px; margin-top: 8px; }
+  video { width: 100%; border-radius: 10px; margin-top: 14px; display: block; }
+  .footer { color: var(--muted); font-size: 12.5px; text-align: center; margin-top: 8px; }
+  .footer a { color: var(--muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Voice-Clone Lipsync Pipeline</h1>
+  <p class="sub">Upload your own read and a reference video. The pipeline cleans up the audio with ElevenLabs speech-to-speech, then lipsyncs it onto your footage with Sync Labs. This is a working demo of the real pipeline, not a mockup.</p>
+
+  <div class="panel">
+    <div class="tabs" id="accessTabs">
+      <div class="tab active" data-mode="code" id="tabCode">I have an invite code</div>
+      <div class="tab" data-mode="pay" id="tabPay">No code — pay to run once</div>
+    </div>
+
+    <div id="paidBanner" class="paid-banner" hidden>Payment confirmed. Upload your files below to generate.</div>
+
+    <form id="jobForm">
+      <div class="field" id="codeField">
+        <label for="inviteCode">Invite code</label>
+        <input type="text" id="inviteCode" placeholder="AB12-CD34-EF56" autocomplete="off">
+        <div class="hint">Provided by Umair for a free demo run.</div>
+      </div>
+      <div class="field">
+        <label for="audioFile">Your recorded read (mp3, wav, or m4a)</label>
+        <input type="file" id="audioFile" accept=".mp3,.wav,.m4a" required>
+      </div>
+      <div class="field">
+        <label for="videoFile">Reference video (mp4 or mov)</label>
+        <input type="file" id="videoFile" accept=".mp4,.mov" required>
+      </div>
+      <button type="submit" id="submitBtn">Generate</button>
+    </form>
+
+    <button type="button" id="payBtn" class="secondary" hidden>Pay & continue (redirects to Stripe Checkout)</button>
+
+    <div id="status">
+      <div class="status-row"><div class="dot" id="statusDot"></div><span id="statusText">Submitting...</span></div>
+      <div id="errorMsg"></div>
+      <video id="resultVideo" controls style="display:none"></video>
+    </div>
+  </div>
+
+  <p class="footer">Built by <a href="https://datawebify.com" target="_blank" rel="noopener">Datawebify</a> — code on <a href="https://github.com/umair801/voice-clone-lipsync-pipeline" target="_blank" rel="noopener">GitHub</a></p>
+</div>
+
+<script>
+const form = document.getElementById('jobForm');
+const submitBtn = document.getElementById('submitBtn');
+const payBtn = document.getElementById('payBtn');
+const codeField = document.getElementById('codeField');
+const inviteCodeInput = document.getElementById('inviteCode');
+const paidBanner = document.getElementById('paidBanner');
+const tabCode = document.getElementById('tabCode');
+const tabPay = document.getElementById('tabPay');
+const statusEl = document.getElementById('status');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const errorMsg = document.getElementById('errorMsg');
+const resultVideo = document.getElementById('resultVideo');
+
+let pollTimer = null;
+let mode = 'code';   // 'code' | 'pay'
+let paymentSessionId = null;
+
+const STATUS_LABEL = {
+  queued: 'Queued...',
+  running: 'Processing — this takes a couple of minutes...',
+  completed: 'Done',
+  failed: 'Failed',
+};
+
+function setDot(status) {
+  statusDot.className = 'dot ' + (status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'running');
+}
+
+function setMode(next) {
+  mode = next;
+  tabCode.classList.toggle('active', mode === 'code');
+  tabPay.classList.toggle('active', mode === 'pay');
+  const alreadyPaid = mode === 'pay' && paymentSessionId;
+  codeField.hidden = mode === 'pay';
+  inviteCodeInput.required = mode === 'code';
+  payBtn.hidden = !(mode === 'pay' && !alreadyPaid);
+  submitBtn.hidden = mode === 'pay' && !alreadyPaid;
+  paidBanner.hidden = !alreadyPaid;
+}
+
+tabCode.addEventListener('click', () => setMode('code'));
+tabPay.addEventListener('click', () => setMode('pay'));
+
+// Pick up a completed Stripe Checkout redirect: /?payment_session=cs_test_...
+const params = new URLSearchParams(window.location.search);
+const returnedSession = params.get('payment_session');
+if (returnedSession) {
+  paymentSessionId = returnedSession;
+  setMode('pay');
+} else {
+  setMode('code');
+}
+
+payBtn.addEventListener('click', async () => {
+  payBtn.disabled = true;
+  payBtn.textContent = 'Redirecting to Stripe...';
+  try {
+    const res = await fetch('/demo/checkout', { method: 'POST' });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || `Could not start checkout (${res.status})`);
+    }
+    const data = await res.json();
+    window.location.href = data.checkout_url;
+  } catch (err) {
+    payBtn.disabled = false;
+    payBtn.textContent = 'Pay & continue (redirects to Stripe Checkout)';
+    errorMsg.textContent = err.message;
+  }
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorMsg.textContent = '';
+  resultVideo.style.display = 'none';
+  submitBtn.disabled = true;
+  statusEl.style.display = 'block';
+  statusText.textContent = 'Uploading...';
+  setDot('running');
+
+  const audioFile = document.getElementById('audioFile').files[0];
+  const videoFile = document.getElementById('videoFile').files[0];
+
+  const body = new FormData();
+  body.append('source_audio', audioFile);
+  body.append('reference_video', videoFile);
+
+  const headers = {};
+  if (mode === 'code') {
+    headers['X-Invite-Code'] = inviteCodeInput.value.trim();
+  } else {
+    headers['X-Payment-Session'] = paymentSessionId;
+  }
+
+  try {
+    const res = await fetch('/demo/jobs', { method: 'POST', headers, body });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || `Request failed (${res.status})`);
+    }
+    const data = await res.json();
+    pollJob(data.job_id);
+  } catch (err) {
+    statusText.textContent = 'Could not submit';
+    errorMsg.textContent = err.message;
+    setDot('failed');
+    submitBtn.disabled = false;
+  }
+});
+
+function pollJob(jobId) {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await fetch(`/jobs/${jobId}`);
+      if (!res.ok) throw new Error(`Status check failed (${res.status})`);
+      const job = await res.json();
+      statusText.textContent = STATUS_LABEL[job.status] || job.status;
+      setDot(job.status);
+
+      if (job.status === 'completed') {
+        clearInterval(pollTimer);
+        submitBtn.disabled = false;
+        resultVideo.src = `/jobs/${jobId}/output`;
+        resultVideo.style.display = 'block';
+      } else if (job.status === 'failed') {
+        clearInterval(pollTimer);
+        submitBtn.disabled = false;
+        errorMsg.textContent = job.error ? `${job.error_stage || 'error'}: ${job.error}` : 'The job failed.';
+      }
+    } catch (err) {
+      clearInterval(pollTimer);
+      submitBtn.disabled = false;
+      statusText.textContent = 'Lost connection while checking status';
+      errorMsg.textContent = err.message;
+      setDot('failed');
+    }
+  }, 3000);
+}
+</script>
+</body>
+</html>

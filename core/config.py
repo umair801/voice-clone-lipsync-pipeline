@@ -42,6 +42,35 @@ class Settings(BaseSettings):
     # per-user identity, no rotation) - adequate for a single-operator
     # tool, not a substitute for real auth on a multi-tenant deployment.
     pipeline_api_key: str | None = None
+
+    # Public demo frontend (Phase 1)
+    # Admin key required to generate invite codes via POST /demo/admin/codes.
+    # None by default - the code-generation endpoint refuses all requests
+    # until this is set, so it's never accidentally open on a fresh deploy.
+    demo_admin_key: str | None = None
+
+    # Public demo frontend (Phase 2) - Stripe Checkout for a visitor with
+    # no invite code. All three below are None/default until explicitly
+    # set - POST /demo/checkout refuses to create a session if the Stripe
+    # keys aren't configured, same "refuse rather than silently misbehave"
+    # pattern as demo_admin_key.
+    stripe_secret_key: str | None = None
+    stripe_publishable_key: str | None = None
+    # Optional - only needed if the Stripe webhook endpoint is wired up
+    # (used for audit logging in Phase 2; payment is actually verified by
+    # retrieving the Checkout Session directly at redemption time, not by
+    # trusting the webhook alone, so this being unset does not break the
+    # paid-access flow itself).
+    stripe_webhook_secret: str | None = None
+    # Price for one demo run, in whole US dollars. $5 is a placeholder -
+    # Umair should set this deliberately, not just accept the default.
+    demo_price_usd: int = 5
+    # Base URL Stripe redirects back to after Checkout. Must be a real
+    # publicly-reachable URL once this is deployed (e.g.
+    # https://lipsync.datawebify.com) - localhost only works for Umair's
+    # own local testing in Stripe test mode.
+    public_base_url: str = "http://localhost:8000"
+
     # Reject an upload once its body exceeds this many bytes, checked
     # while streaming to disk (not just Content-Length, which a client
     # can lie about). 100MB covers real short-form video/audio with

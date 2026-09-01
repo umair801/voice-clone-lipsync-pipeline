@@ -21,3 +21,24 @@ class JobStatusResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
+
+
+class InviteCodeCreateRequest(BaseModel):
+    label: str | None = None
+
+
+class InviteCodeResponse(BaseModel):
+    code: str
+    label: str | None = None
+    created_at: str
+    used_at: str | None = None
+    used_by_job_id: str | None = None
+
+
+class InviteCodeListResponse(BaseModel):
+    codes: list[InviteCodeResponse]
+
+
+class CheckoutSessionResponse(BaseModel):
+    checkout_url: str
+    session_id: str

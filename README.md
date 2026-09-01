@@ -121,6 +121,57 @@ lands on `needs_review` (finished, but the QA check wants a human look) or
 `failed` (with `error` and `error_stage` telling you exactly what broke
 and where).
 
+### Via the public demo frontend
+
+A single-page demo lives at `frontend/index.html`, served by the API
+itself at `/` (no separate frontend server or build step). A visitor
+uploads their own read + reference video and an invite code, and gets
+the finished clip back in-browser once the pipeline completes.
+
+Access is gated by one-time invite codes rather than open to anyone:
+
+```bash
+# Generate a code to hand to a client (requires DEMO_ADMIN_KEY set in .env)
+curl -X POST http://localhost:8000/demo/admin/codes \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: $DEMO_ADMIN_KEY" \
+  -d '{"label": "acme corp - upwork proposal"}'
+# -> {"code": "AB12-CD34-EF56", ...}
+```
+
+Each code is single-use; the frontend submits it as `X-Invite-Code` on
+`POST /demo/jobs`, which shares the same upload/pipeline-execution code
+as the internal `POST /jobs` (via `core/job_runner.py`) but is validated
+against an invite code instead of `X-API-Key`.
+
+**Phase 2 - paid access for visitors without a code:**
+
+```bash
+# Frontend calls this, then redirects the browser to the returned URL
+curl -X POST http://localhost:8000/demo/checkout
+# -> {"checkout_url": "https://checkout.stripe.com/...", "session_id": "cs_..."}
+```
+
+Stripe redirects back to `PUBLIC_BASE_URL/?payment_session=<id>` on
+success; the frontend picks that up and submits it as
+`X-Payment-Session` instead of `X-Invite-Code` on `POST /demo/jobs`.
+Payment is verified server-side by retrieving the Checkout Session
+directly from Stripe (`core/payments.py`), not by trusting the redirect
+alone or a webhook - `POST /demo/stripe/webhook` exists but is audit
+logging only, not the access gate. One payment redeems exactly once
+(`core/payment_store.py`), and redemption happens atomically before the
+upload is processed (closing a real race where two concurrent requests
+for the same session could otherwise both start a billable run off one
+payment) - if the upload itself is then rejected, the session is
+released back rather than burned on a fixable mistake.
+
+Built against Stripe's REST API directly via `requests`, not the
+official `stripe` SDK - the SDK showed intermittent SSL connection
+failures on the machine this was developed on that plain `requests`
+didn't; see `core/payments.py`'s docstring for the full story. Worth
+re-verifying once this is deployed to Railway, since that's a different
+network path.
+
 ### Automatically, via a watched folder
 
 Drop a matching pair of files into the folder set by `INCOMING_DIR` (e.g.
@@ -206,6 +257,23 @@ submission step needed for a recurring/scheduled content pipeline.
   streaming itself runs off the event loop (via `run_in_threadpool`), so
   one large upload in progress doesn't stall other in-flight requests,
   including `/health`.
+- **The public demo frontend (`/`) has no rate limiting beyond one job
+  per invite code.** Each real job costs real ElevenLabs/Sync Labs
+  money; a leaked or guessed admin key would let someone mint unlimited
+  free codes. `DEMO_ADMIN_KEY` must be a real random secret before this
+  is deployed anywhere public, and codes should be issued individually,
+  not in bulk, until Phase 2's Stripe-gated public path replaces the
+  need to hand out codes at all.
+- **The paid path (Phase 2) has no rate limiting either, and card fraud
+  (stolen-card testing, chargebacks) is a real risk on any public
+  Checkout page.** Stripe's own fraud tooling (Radar) applies by
+  default, but nothing in this codebase adds extra limits (e.g. max
+  paid runs per IP per hour). Worth revisiting before real traffic, not
+  before that.
+- **`PUBLIC_BASE_URL` must be the real HTTPS deployment URL before this
+  goes live**, not `localhost` - Stripe redirects the browser there
+  after Checkout, and Checkout Session ids should not be exchanged over
+  an unencrypted connection.
 
 ## Project layout
 
@@ -218,19 +286,30 @@ agents/
     video_normalize.py            # rotation-baking video normalization
     qa_checks.py                  # automated duration + face-presence QA
 api/
-  routes.py               # POST /jobs, GET /jobs/{id}, GET /health
+  routes.py               # POST /jobs, GET /jobs/{id}, GET /jobs/{id}/output, GET /health
+  demo.py                  # POST /demo/jobs (invite-code gated), admin code endpoints
   scheduler.py             # watched-folder auto-submit trigger
   schemas.py                # request/response models
 core/
   config.py                 # centralized settings (.env-backed)
   logging.py                 # structured logging setup
   job_store.py                 # in-memory job status/result store
+  job_runner.py                 # shared upload-handling + pipeline execution
+  access_store.py                # in-memory invite-code store (demo frontend)
+  payment_store.py                # single-use redemption tracking for paid sessions
+  payments.py                      # Stripe REST API client (Checkout, webhook verify)
+frontend/
+  index.html                 # single-page public demo UI, served at "/"
 main.py                        # FastAPI app entrypoint
 tests/
   test_orchestrator_mocked.py     # pipeline tests (real ffmpeg/ffprobe,
                                     # mocked external voice/lipsync APIs)
   test_api_hardening.py            # API auth, upload cap, cleanup-on-reject,
                                     # job-store tests
+  test_access_store.py              # invite-code generate/validate/redeem tests
+  test_demo_api.py                   # demo submit + admin code endpoint tests
+  test_payments.py                    # payment-store redemption + webhook sig tests
+  test_demo_payment_api.py             # checkout + payment-gated submit endpoint tests
 ```
 
 ## Testing
